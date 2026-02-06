@@ -7,6 +7,7 @@ import pufferlib
 from pufferlib.ocean.gbgridenv import binding
 
 OBS_WINDOW = 20
+OBS_CHANNELS = 6
 
 
 class GbGridEnv(pufferlib.PufferEnv):
@@ -21,7 +22,7 @@ class GbGridEnv(pufferlib.PufferEnv):
         seed=0,
     ):
         self.single_observation_space = gymnasium.spaces.Box(
-            low=0, high=2, shape=(OBS_WINDOW, OBS_WINDOW), dtype=np.uint8
+            low=-1.0, high=1.0, shape=(OBS_WINDOW, OBS_WINDOW, OBS_CHANNELS), dtype=np.float32
         )
         self.single_action_space = gymnasium.spaces.Discrete(5)
         self.render_mode = render_mode

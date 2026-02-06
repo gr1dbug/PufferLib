@@ -15,6 +15,8 @@ typedef struct {
 
 #define GBGRID_DEFAULT_SIZE 100
 #define GBGRID_OBS_WINDOW 20
+#define GBGRID_OBS_CHANNELS 6
+#define GBGRID_CARRY_NORM 3.0f
 
 typedef struct {
     float water;
@@ -53,7 +55,7 @@ typedef struct {
 
 typedef struct {
     Log log;                     // Required field
-    unsigned char* observations; // Required field. Ensure type matches in .py and .c
+    float* observations;         // Required field. Ensure type matches in .py and .c
     int* actions;                // Required field. Ensure type matches in .py and .c
     float* rewards;              // Required field
     unsigned char* terminals;    // Required field
@@ -62,6 +64,8 @@ typedef struct {
     GbGridCell* grid;
     GbGridAgent agent;
     int agent_initial_energy;
+    int depot_x;
+    int depot_y;
     int needs_reset;
 } GbGridEnv;
 
@@ -116,25 +120,37 @@ static inline void gbgrid_agent_reset(GbGridEnv* env) {
     env->agent.delivered_total = 0.0f;
     env->agent.x = 0;
     env->agent.y = 0;
+
+    int soil_count = 0;
     for (int y = 1; y < env->height - 1; y++) {
         for (int x = 1; x < env->width - 1; x++) {
             GbGridCell* cell = gbgrid_cell(env, x, y);
             if (cell && cell->type == GBGRID_CELL_SOIL) {
-                env->agent.x = x;
-                env->agent.y = y;
-                return;
+                soil_count += 1;
             }
         }
     }
-    for (int y = 1; y < env->height - 1; y++) {
-        for (int x = 1; x < env->width - 1; x++) {
-            GbGridCell* cell = gbgrid_cell(env, x, y);
-            if (cell && cell->type == GBGRID_CELL_DEPOT) {
-                env->agent.x = x;
-                env->agent.y = y;
-                return;
+    if (soil_count > 0) {
+        int target = rand() % soil_count;
+        int seen = 0;
+        for (int y = 1; y < env->height - 1; y++) {
+            for (int x = 1; x < env->width - 1; x++) {
+                GbGridCell* cell = gbgrid_cell(env, x, y);
+                if (!(cell && cell->type == GBGRID_CELL_SOIL)) {
+                    continue;
+                }
+                if (seen == target) {
+                    env->agent.x = x;
+                    env->agent.y = y;
+                    return;
+                }
+                seen += 1;
             }
         }
+    }
+    if (env->depot_x >= 0 && env->depot_y >= 0) {
+        env->agent.x = env->depot_x;
+        env->agent.y = env->depot_y;
     }
 }
 
@@ -221,12 +237,72 @@ static inline float gbgrid_agent_deposit(GbGridEnv* env, GbGridAgent* agent) {
     return deposited;
 }
 
+static inline float gbgrid_inventory_total(const GbGridAgent* agent) {
+    if (!agent) {
+        return 0.0f;
+    }
+    return agent->inventory.water
+        + agent->inventory.organic_material
+        + agent->inventory.nutr_a
+        + agent->inventory.nutr_b
+        + agent->inventory.nutr_c;
+}
+
 static inline void gbgrid_write_observation(GbGridEnv* env) {
     if (!env || !env->observations || env->width <= 0 || env->height <= 0) {
         return;
     }
-    size_t obs_count = (size_t)GBGRID_OBS_WINDOW * (size_t)GBGRID_OBS_WINDOW;
-    memset(env->observations, GBGRID_CELL_SOLID, obs_count * sizeof(unsigned char));
+    size_t obs_count = (size_t)GBGRID_OBS_WINDOW
+        * (size_t)GBGRID_OBS_WINDOW
+        * (size_t)GBGRID_OBS_CHANNELS;
+    memset(env->observations, 0, obs_count * sizeof(float));
+
+    float energy_norm = 0.0f;
+    if (env->agent_initial_energy > 0) {
+        energy_norm = (float)env->agent.energy / (float)env->agent_initial_energy;
+    }
+    if (energy_norm < 0.0f) {
+        energy_norm = 0.0f;
+    } else if (energy_norm > 1.0f) {
+        energy_norm = 1.0f;
+    }
+
+    int dx_i = env->depot_x - env->agent.x;
+    int dy_i = env->depot_y - env->agent.y;
+    float dx_norm = 0.0f;
+    float dy_norm = 0.0f;
+    if (env->width > 1) {
+        dx_norm = (float)dx_i / (float)(env->width - 1);
+    }
+    if (env->height > 1) {
+        dy_norm = (float)dy_i / (float)(env->height - 1);
+    }
+    if (dx_norm < -1.0f) dx_norm = -1.0f;
+    if (dx_norm > 1.0f) dx_norm = 1.0f;
+    if (dy_norm < -1.0f) dy_norm = -1.0f;
+    if (dy_norm > 1.0f) dy_norm = 1.0f;
+
+    float dist_x = 0.0f;
+    float dist_y = 0.0f;
+    if (env->width > 1) {
+        dist_x = (float)abs(dx_i) / (float)(env->width - 1);
+    }
+    if (env->height > 1) {
+        dist_y = (float)abs(dy_i) / (float)(env->height - 1);
+    }
+    float dist_norm = 0.5f * (dist_x + dist_y);
+    if (dist_norm < 0.0f) {
+        dist_norm = 0.0f;
+    } else if (dist_norm > 1.0f) {
+        dist_norm = 1.0f;
+    }
+
+    float carried_norm = gbgrid_inventory_total(&env->agent) / GBGRID_CARRY_NORM;
+    if (carried_norm < 0.0f) {
+        carried_norm = 0.0f;
+    } else if (carried_norm > 1.0f) {
+        carried_norm = 1.0f;
+    }
 
     int half = GBGRID_OBS_WINDOW / 2;
     int start_x = env->agent.x - half;
@@ -243,7 +319,14 @@ static inline void gbgrid_write_observation(GbGridEnv* env) {
             }
             GbGridCell* cell = gbgrid_cell(env, x, y);
             if (cell) {
-                env->observations[oy * GBGRID_OBS_WINDOW + ox] = (unsigned char)cell->type;
+                size_t base = ((size_t)oy * (size_t)GBGRID_OBS_WINDOW + (size_t)ox)
+                    * (size_t)GBGRID_OBS_CHANNELS;
+                env->observations[base + 0] = (float)cell->type / 2.0f;
+                env->observations[base + 1] = energy_norm;
+                env->observations[base + 2] = dx_norm;
+                env->observations[base + 3] = dy_norm;
+                env->observations[base + 4] = dist_norm;
+                env->observations[base + 5] = carried_norm;
             }
         }
     }
@@ -330,6 +413,8 @@ void c_reset(GbGridEnv* env) {
     }
     if (interior_count > 0) {
         int soil_count = 0;
+        env->depot_x = -1;
+        env->depot_y = -1;
         for (int y = 1; y < env->height - 1; y++) {
             for (int x = 1; x < env->width - 1; x++) {
                 GbGridCell* cell = &env->grid[y * env->width + x];
@@ -355,6 +440,8 @@ void c_reset(GbGridEnv* env) {
                         cell->soil.nutr_a = 0.0f;
                         cell->soil.nutr_b = 0.0f;
                         cell->soil.nutr_c = 0.0f;
+                        env->depot_x = x;
+                        env->depot_y = y;
                         depot_set = 1;
                         break;
                     }
@@ -365,6 +452,29 @@ void c_reset(GbGridEnv* env) {
                 }
             }
         }
+    }
+    if (env->depot_x < 0 || env->depot_y < 0) {
+        for (int y = 1; y < env->height - 1; y++) {
+            for (int x = 1; x < env->width - 1; x++) {
+                GbGridCell* cell = &env->grid[y * env->width + x];
+                if (cell->type == GBGRID_CELL_SOIL) {
+                    cell->type = GBGRID_CELL_DEPOT;
+                    cell->soil.water = 0.0f;
+                    cell->soil.organic_material = 0.0f;
+                    cell->soil.nutr_a = 0.0f;
+                    cell->soil.nutr_b = 0.0f;
+                    cell->soil.nutr_c = 0.0f;
+                    env->depot_x = x;
+                    env->depot_y = y;
+                    y = env->height;
+                    break;
+                }
+            }
+        }
+    }
+    if (env->depot_x < 0 || env->depot_y < 0) {
+        env->depot_x = 0;
+        env->depot_y = 0;
     }
     gbgrid_agent_reset(env);
     env->needs_reset = 0;

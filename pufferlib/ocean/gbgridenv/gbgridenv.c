@@ -3,9 +3,9 @@
 int main() {
     GbGridEnv env = {0};
     int size = GBGRID_DEFAULT_SIZE;
-    env.observations = (unsigned char*)calloc(
+    env.observations = (float*)calloc(
         (size_t)GBGRID_OBS_WINDOW * (size_t)GBGRID_OBS_WINDOW,
-        sizeof(unsigned char)
+        (size_t)GBGRID_OBS_CHANNELS * sizeof(float)
     );
     env.actions = (int*)calloc(1, sizeof(int));
     env.rewards = (float*)calloc(1, sizeof(float));

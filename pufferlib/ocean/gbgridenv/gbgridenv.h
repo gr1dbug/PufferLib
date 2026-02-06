@@ -557,17 +557,99 @@ void c_step(GbGridEnv* env) {
 }
 
 void c_render(GbGridEnv* env) {
+    if (!env || !env->grid || env->width <= 0 || env->height <= 0) {
+        return;
+    }
+
     if (!IsWindowReady()) {
         InitWindow(1080, 720, "PufferLib GbGridEnv");
-        SetTargetFPS(5);
+        SetWindowState(FLAG_WINDOW_RESIZABLE);
+        SetTargetFPS(20);
     }
 
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
+    if (IsKeyPressed(KEY_TAB)) {
+        ToggleFullscreen();
+    }
+
+    const Color COLOR_AGENT = (Color){60, 120, 255, 255};       // blue
+    const Color COLOR_SOIL = (Color){194, 152, 104, 255};       // light brown
+    const Color COLOR_SOLID = (Color){196, 196, 196, 255};      // light gray
+    const Color COLOR_DEPOT = (Color){220, 48, 48, 255};        // red
+
+    const int margin = 16;
+    const int hud_height = 70;
+    int available_width = GetScreenWidth() - 2 * margin;
+    int available_height = GetScreenHeight() - 2 * margin - hud_height;
+    if (available_width < 1) {
+        available_width = 1;
+    }
+    if (available_height < 1) {
+        available_height = 1;
+    }
+
+    int tile_size_x = available_width / env->width;
+    int tile_size_y = available_height / env->height;
+    int tile_size = tile_size_x < tile_size_y ? tile_size_x : tile_size_y;
+    if (tile_size < 1) {
+        tile_size = 1;
+    }
+
+    int grid_width = env->width * tile_size;
+    int grid_height = env->height * tile_size;
+    int origin_x = margin + (available_width - grid_width) / 2;
+    int origin_y = margin + hud_height + (available_height - grid_height) / 2;
 
     BeginDrawing();
     ClearBackground(PUFF_BACKGROUND);
+
+    for (int y = 0; y < env->height; y++) {
+        for (int x = 0; x < env->width; x++) {
+            GbGridCell* cell = &env->grid[y * env->width + x];
+            Color color = COLOR_SOLID;
+            if (cell->type == GBGRID_CELL_SOIL) {
+                color = COLOR_SOIL;
+            } else if (cell->type == GBGRID_CELL_DEPOT) {
+                color = COLOR_DEPOT;
+            }
+
+            DrawRectangle(
+                origin_x + x * tile_size,
+                origin_y + y * tile_size,
+                tile_size,
+                tile_size,
+                color
+            );
+        }
+    }
+
+    if (env->agent.x >= 0 && env->agent.x < env->width && env->agent.y >= 0 && env->agent.y < env->height) {
+        int inset = tile_size > 2 ? 1 : 0;
+        DrawRectangle(
+            origin_x + env->agent.x * tile_size + inset,
+            origin_y + env->agent.y * tile_size + inset,
+            tile_size - 2 * inset,
+            tile_size - 2 * inset,
+            COLOR_AGENT
+        );
+    }
+
+    DrawText(
+        TextFormat(
+            "Energy: %d  Carry: %.2f  Delivered: %.2f  Reward: %.3f",
+            env->agent.energy,
+            gbgrid_inventory_total(&env->agent),
+            env->agent.delivered_total,
+            env->rewards ? env->rewards[0] : 0.0f
+        ),
+        margin,
+        14,
+        20,
+        PUFF_WHITE
+    );
+    DrawText("Controls: Shift + Arrow keys/WASD to move, Shift+Space to stay", margin, 40, 16, PUFF_WHITE);
     EndDrawing();
 }
 

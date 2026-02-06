@@ -1,11 +1,15 @@
 #include "gbgridenv.h"
 
 int main() {
-    GbGridEnv env = {.size = 5};
+    GbGridEnv env = {0};
+    int size = GBGRID_DEFAULT_SIZE;
     env.observations = (unsigned char*)calloc(1, sizeof(unsigned char));
     env.actions = (int*)calloc(1, sizeof(int));
     env.rewards = (float*)calloc(1, sizeof(float));
     env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env.agent_initial_energy = 50;
+
+    gbgrid_alloc(&env, size, size);
 
     c_reset(&env);
     c_render(&env);
@@ -28,6 +32,6 @@ int main() {
     free(env.actions);
     free(env.rewards);
     free(env.terminals);
+    gbgrid_free(&env);
     c_close(&env);
 }
-

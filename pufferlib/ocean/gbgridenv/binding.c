@@ -52,8 +52,6 @@ static PyObject* my_get(PyObject* dict, Env* env) {
         PyDict_SetItemString(dict, "height", PyLong_FromLong(0));
         PyDict_SetItemString(dict, "cell_types", Py_None);
         PyDict_SetItemString(dict, "soil", Py_None);
-        Py_INCREF(Py_None);
-        Py_INCREF(Py_None);
         return dict;
     }
 
